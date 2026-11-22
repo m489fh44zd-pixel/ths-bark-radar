@@ -1,0 +1,39 @@
+
+name: Bark Push Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  bark-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Bark notification
+        env:
+          BARK_DEVICE_KEY: ${{ secrets.BARK_DEVICE_KEY }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import json
+          import urllib.request
+
+          key = os.environ["BARK_DEVICE_KEY"]
+          if not key:
+              raise SystemExit("BARK_DEVICE_KEY is empty")
+
+          data = {
+              "device_key": key,
+              "title": "同花顺动态提醒测试",
+              "body": "GitHub 云端已成功连接 Bark！"
+          }
+
+          req = urllib.request.Request(
+              "https://api.day.app/push",
+              data=json.dumps(data).encode("utf-8"),
+              headers={"Content-Type": "application/json"},
+              method="POST"
+          )
+
+          with urllib.request.urlopen(req, timeout=20) as response:
+              print(response.read().decode("utf-8"))
+          PY
