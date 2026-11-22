@@ -2,6 +2,9 @@
 name: Bark Push Test
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
@@ -17,9 +20,9 @@ jobs:
           import json
           import urllib.request
 
-          key = os.environ["BARK_DEVICE_KEY"]
+          key = os.environ.get("BARK_DEVICE_KEY")
           if not key:
-              raise SystemExit("BARK_DEVICE_KEY is empty")
+              raise SystemExit("BARK_DEVICE_KEY is missing")
 
           data = {
               "device_key": key,
