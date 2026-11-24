@@ -1,7 +1,7 @@
 
 name: Test Tonghuashun Public Page
 
-on:
+'on'::
   workflow_dispatch:
 
 jobs:
