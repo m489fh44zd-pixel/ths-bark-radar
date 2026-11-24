@@ -1,0 +1,109 @@
+
+name: Tonghuashun Blogger Monitor
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check blogger updates and send Bark
+        env:
+          BARK_DEVICE_KEY: ${{ secrets.BARK_DEVICE_KEY }}
+        run: |
+          python3 - <<'PY'
+          import urllib.request
+          import urllib.error
+          import json
+          import re
+          import os
+          import subprocess
+
+          url = "https://t.10jqka.com.cn/lgt/community/personal-homepage.html?user_code=1179giyc4jr06d6785e69e&client_userid=vB5Um&back_source=hyperlink&share_hxapp=isc&fontzoom=no"
+
+          req = urllib.request.Request(
+              url,
+              headers={"User-Agent": "Mozilla/5.0"}
+          )
+
+          with urllib.request.urlopen(req, timeout=30) as r:
+              html = r.read().decode("utf-8", errors="ignore")
+
+          patterns = [
+              r'contentId["\']?\s*[:=]\s*["\']([A-Za-z0-9_-]{12,})',
+              r'content_id["\']?\s*[:=]\s*["\']([A-Za-z0-9_-]{12,})',
+              r'contentId=([A-Za-z0-9_-]{12,})'
+          ]
+
+          ids = []
+          for pattern in patterns:
+              ids.extend(re.findall(pattern, html, re.I))
+
+          ids = list(dict.fromkeys(ids))
+
+          if not ids:
+              raise Exception("未找到动态ID，暂不更新记录")
+
+          latest = ids[0]
+          print("发现最新动态ID:", latest)
+
+          state_file = "last_post_id.txt"
+
+          if not os.path.exists(state_file):
+              with open(state_file, "w") as f:
+                  f.write(latest)
+              print("首次运行，已记录当前动态，不发送通知")
+          else:
+              with open(state_file) as f:
+                  old = f.read().strip()
+
+              if latest != old:
+                  key = os.environ["BARK_DEVICE_KEY"]
+                  payload = {
+                      "device_key": key,
+                      "title": "同花顺博主更新提醒",
+                      "body": "重生之散户一哥发布了新动态，请及时查看。",
+                      "url": "https://t.10jqka.com.cn/lgt/community/personal-homepage.html?user_code=1179giyc4jr06d6785e69e"
+                  }
+
+                  data = json.dumps(payload).encode("utf-8")
+                  request = urllib.request.Request(
+                      "https://api.day.app/push",
+                      data=data,
+                      headers={"Content-Type": "application/json"},
+                      method="POST"
+                  )
+
+                  with urllib.request.urlopen(request, timeout=30) as r:
+                      print("Bark推送状态:", r.status)
+                      print(r.read().decode("utf-8", errors="ignore"))
+
+                  with open(state_file, "w") as f:
+                      f.write(latest)
+
+                  print("新动态已记录")
+              else:
+                  print("没有新动态")
+
+          PY
+
+      - name: Save latest post ID
+        run: |
+          if git diff --quiet -- last_post_id.txt; then
+            echo "没有需要保存的变化"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add last_post_id.txt
+            git commit -m "Update latest blogger post ID"
+            git push
+          fi
