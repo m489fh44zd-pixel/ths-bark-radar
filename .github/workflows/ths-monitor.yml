@@ -51,7 +51,9 @@ jobs:
           ids = list(dict.fromkeys(ids))
 
           if not ids:
-              raise Exception("未找到动态ID，暂不更新记录")
+    print("网页源码前2000字符：")
+    print(html[:2000])
+    raise Exception("未找到动态ID")
 
           latest = ids[0]
           print("发现最新动态ID:", latest)
