@@ -22,103 +22,94 @@ jobs:
           python3 -m pip install playwright
           python3 -m playwright install chromium --with-deps
 
-      - name: Check blogger updates and send Bark
+      - name: Read webpage text and extract ID
         env:
           BARK_DEVICE_KEY: ${{ secrets.BARK_DEVICE_KEY }}
         run: |
           python3 - <<'PY'
-          import urllib.request
-          import json
-          import re
           import os
+          import re
+          import json
+          import urllib.request
+          from urllib.parse import urlparse, parse_qs
           from playwright.sync_api import sync_playwright
 
           url = "https://t.10jqka.com.cn/lgt/community/personal-homepage.html?user_code=1179giyc4jr06d6785e69e&client_userid=vB5Um&back_source=hyperlink&share_hxapp=isc&fontzoom=no"
 
-          responses = []
-          response_urls = []
-
           with sync_playwright() as p:
               browser = p.chromium.launch(headless=True)
-              page = browser.new_page(
-                  user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36"
-              )
-
-              def capture(response):
-                  if "10jqka.com.cn" in response.url:
-                      response_urls.append(response.url)
-                      try:
-                          if response.status == 200:
-                              body = response.body()
-                              responses.append(body.decode("utf-8", errors="ignore"))
-                      except Exception:
-                          pass
-
-              page.on("response", capture)
-
+              page = browser.new_page()
               page.goto(url, wait_until="domcontentloaded", timeout=60000)
               page.wait_for_timeout(15000)
 
-              html = page.content()
-              page_text = page.locator("body").inner_text()
+              # 直接读取网页可见文字
+              text = page.locator("body").inner_text()
+
+              # 直接读取网页中的动态链接
+              links = page.locator("a").evaluate_all(
+                  "(els) => els.map(a => a.href)"
+              )
 
               browser.close()
 
-          print("主页标题:", page_text[:500])
-
-          sources = [html] + responses
-
-          patterns = [
-              r'contentId["\']?\s*[:=]\s*["\']([A-Za-z0-9_-]{12,})',
-              r'content_id["\']?\s*[:=]\s*["\']([A-Za-z0-9_-]{12,})',
-              r'contentId=([A-Za-z0-9_-]{12,})'
-          ]
+          print("网页文字读取成功")
+          print(text[:3000])
 
           ids = []
 
-          for source in sources:
-              for pattern in patterns:
-                  ids.extend(re.findall(pattern, source, re.I))
+          # 从动态链接中提取 contentId
+          for link in links:
+              if "discussDetail" not in link:
+                  continue
 
+              query = parse_qs(urlparse(link).query)
+
+              for key, values in query.items():
+                  if key.lower() == "contentid":
+                      ids.extend(values)
+
+          # 从网页文字中提取 contentId
+          pattern = r'contentId["\']?\s*[:=]\s*["\']?([A-Za-z0-9_-]{12,})'
+
+          ids.extend(re.findall(pattern, text, re.I))
+
+          # 去重
           ids = list(dict.fromkeys(ids))
 
+          print("找到动态ID数量:", len(ids))
+
           if not ids:
-              print("仍未找到动态ID")
-              print("页面文字:", page_text[:2000])
-              print("同花顺请求地址:")
-              for item in response_urls[:30]:
-                  print(item)
-              raise Exception("浏览器加载后仍未找到动态ID")
+              print("网页中没有找到动态ID")
+              print("动态链接如下:")
+              for link in links[:50]:
+                  print(link)
+              raise Exception("未找到网页动态ID")
 
           latest = ids[0]
-          print("发现动态ID:", latest)
+          print("最新动态ID:", latest)
 
           state_file = "last_post_id.txt"
 
           if not os.path.exists(state_file):
               with open(state_file, "w") as f:
                   f.write(latest)
-              print("首次运行，已记录当前动态")
+              print("首次运行，记录当前动态，不发送通知")
 
           else:
               with open(state_file) as f:
                   old = f.read().strip()
 
               if latest != old:
-                  key = os.environ["BARK_DEVICE_KEY"]
-
                   payload = {
-                      "device_key": key,
+                      "device_key": os.environ["BARK_DEVICE_KEY"],
                       "title": "同花顺博主更新提醒",
                       "body": "重生之散户一哥发布了新动态，请及时查看。",
                       "url": "https://t.10jqka.com.cn/lgt/community/personal-homepage.html?user_code=1179giyc4jr06d6785e69e"
                   }
 
-                  data = json.dumps(payload).encode("utf-8")
-
                   request = urllib.request.Request(
                       "https://api.day.app/push",
-                      data=data,
+                      data=json.dumps(payload).encode("utf-8"),
                       headers={"Content-Type": "application/json"},
                       method="POST"
                   )
@@ -139,12 +130,12 @@ jobs:
 
       - name: Save latest post ID
         run: |
-          if git diff --quiet -- last_post_id.txt; then
-            echo "没有需要保存的变化"
-          else
+          git add last_post_id.txt
+          if ! git diff --cached --quiet; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add last_post_id.txt
             git commit -m "Update latest blogger post ID"
             git push
+          else
+            echo "没有需要保存的变化"
           fi
